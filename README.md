@@ -14,7 +14,7 @@ Each model turn becomes a `TokenEvent`: input, output, cache read, cache write a
 ## Install
 
 ```sh
-bun add github:HansKristoffer/llm-usage-extraction
+bun add github:HansKristoffer/llm-usage-extraction#v0.1.0
 ```
 
 ## Use

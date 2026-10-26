@@ -128,6 +128,18 @@ describe("parseClaudeCodeFile (synthetic)", () => {
     expect(r.events.length).toBe(1);
   });
 
+  it("takes a response's usage from its last content-block line, where output is final", async () => {
+    const block = (output_tokens: number) =>
+      JSON.stringify({
+        ...baseAssistant,
+        message: { ...baseAssistant.message, usage: { ...baseAssistant.message.usage, output_tokens } },
+      });
+    const path = await makeTempJsonl([block(2), block(2), block(340)]);
+    const r = await parseClaudeCodeFile({ path, byteOffset: 0 });
+    expect(r.events.map((e) => e.outputTokens)).toEqual([340]);
+    expect(r.seenDedupKeys).toEqual(["msg-001:req-1"]);
+  });
+
   it("skips assistant lines lacking message.id", async () => {
     const path = await makeTempJsonl([
       JSON.stringify({
@@ -267,6 +279,32 @@ describe("parseClaudeCodeFile (synthetic)", () => {
     expect(r.events.length).toBe(1);
     expect(r.events[0]!.messageId).toBe("uuid-real-1");
     expect(r.events[0]!.messageType).toBe("user");
+  });
+
+  it("skips lines that can't be events unparsed, but never a prompt or a response", async () => {
+    const prompt = (uuid: string, content: string) =>
+      JSON.stringify({
+        type: "user",
+        uuid,
+        sessionId: "s",
+        timestamp: "2026-05-01T00:00:00.000Z",
+        message: { content },
+      });
+    const path = await makeTempJsonl([
+      JSON.stringify({ type: "attachment", attachment: { type: "file", content: "x".repeat(1000) } }),
+      JSON.stringify({ type: "system", subtype: "api_request", usage: { input_tokens: 5 } }),
+      JSON.stringify({
+        type: "user",
+        uuid: "u-tool",
+        message: { content: [{ type: "tool_result", tool_use_id: "t", content: "ok" }] },
+      }),
+      // Prompts that mention the words the filter looks for are still prompts.
+      prompt("u-usage", "usage"),
+      prompt("u-quoted", 'what does "usage" mean in a "tool_result"?'),
+      JSON.stringify(baseAssistant),
+    ]);
+    const r = await parseClaudeCodeFile({ path, byteOffset: 0 });
+    expect(r.events.map((e) => e.messageId)).toEqual(["u-usage", "u-quoted", "msg-001"]);
   });
 
   it("skips zero-usage assistant lines", async () => {

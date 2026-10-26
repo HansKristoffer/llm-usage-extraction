@@ -15,7 +15,8 @@ import type { ExtractState, FileState, Source, TokenEvent } from "./types.ts";
 /** A file-backed source: list its files, parse one from where the last read stopped. */
 export interface FileSource {
   id: Source;
-  list: () => Promise<string[]>;
+  /** The files under `dir`, or under the default locations when there is none. */
+  list: (dir?: string) => Promise<string[]>;
   parse: (
     path: string,
     prev: FileState | undefined,
@@ -88,9 +89,17 @@ export interface CollectOptions {
   /** Flush a batch once it holds at least this many events. */
   batchSize?: number;
   sources?: readonly FileSource[];
+  /** Read only these folders for a source, in place of its default locations (and env). */
+  dirs?: Partial<Record<Source, readonly string[]>>;
   cursorDbPath?: string;
+  /** Message keys already taken this run. A long-running caller can pass a smaller set, such as one
+   *  of hashes. Defaults to a `Set` of the keys. */
+  seen?: { has: (key: string) => boolean; add: (key: string) => unknown };
   onError?: (err: unknown, where: string) => void;
 }
+
+/** Files stat'ed at once. */
+const STAT_BATCH = 64;
 
 async function mtimeOf(path: string): Promise<number | null> {
   try {
@@ -108,7 +117,7 @@ async function mtimeOf(path: string): Promise<number | null> {
 export async function* collect(state: ExtractState, opts: CollectOptions): AsyncGenerator<Batch> {
   const batchSize = opts.batchSize ?? 5000;
   const sources = opts.sources ?? FILE_SOURCES;
-  const seen = new Set<string>();
+  const seen = opts.seen ?? new Set<string>();
   let events: TokenEvent[] = [];
   let pending: FileState[] = [];
 
@@ -139,24 +148,33 @@ export async function* collect(state: ExtractState, opts: CollectOptions): Async
     if (!opts.enabled.has(source.id)) continue;
     let paths: string[] = [];
     try {
-      paths = await source.list();
+      const dirs = opts.dirs?.[source.id];
+      paths = dirs
+        ? [...new Set((await Promise.all(dirs.map((dir) => source.list(dir)))).flat())]
+        : await source.list();
     } catch (err) {
       opts.onError?.(err, `list:${source.id}`);
     }
-    for (const path of paths) {
-      present.add(path);
-      const mtimeMs = await mtimeOf(path);
-      if (mtimeMs === null) continue;
-      const prev = state.files[path];
-      if (prev && mtimeMs <= prev.mtimeMs) continue;
-      try {
-        const r = await source.parse(path, prev, mtimeMs);
-        take(r.events);
-        pending.push(r.next);
-      } catch (err) {
-        opts.onError?.(err, `parse:${path}`);
+    // Most files haven't changed since the last read, so their stats are the bulk of the work: a
+    // batch at a time, not one after another.
+    for (let i = 0; i < paths.length; i += STAT_BATCH) {
+      const batch = paths.slice(i, i + STAT_BATCH);
+      const mtimes = await Promise.all(batch.map(mtimeOf));
+      for (const [j, path] of batch.entries()) {
+        present.add(path);
+        const mtimeMs = mtimes[j];
+        if (mtimeMs === null || mtimeMs === undefined) continue;
+        const prev = state.files[path];
+        if (prev && mtimeMs <= prev.mtimeMs) continue;
+        try {
+          const r = await source.parse(path, prev, mtimeMs);
+          take(r.events);
+          pending.push(r.next);
+        } catch (err) {
+          opts.onError?.(err, `parse:${path}`);
+        }
+        if (events.length >= batchSize) yield flush();
       }
-      if (events.length >= batchSize) yield flush();
     }
   }
 

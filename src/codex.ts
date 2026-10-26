@@ -275,6 +275,17 @@ function buildMessageId(sessionId: string, timestamp: string, ixForTimestamp: nu
   return `${sessionId}:${timestamp}:${ixForTimestamp}`;
 }
 
+/**
+ * Outside a fork's seed only these lines do anything, so the rest (most of a rollout's bytes) are
+ * skipped unparsed. A seed is armed by a `session_meta` line, which carries its own timestamp for
+ * the gap check, so nothing skipped before it is needed.
+ */
+const mayMatter = (line: string): boolean =>
+  line.includes('"token_count"') ||
+  line.includes('"user"') ||
+  line.includes('"turn_context"') ||
+  line.includes('"session_meta"');
+
 export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCodexResult> {
   const { path, byteOffset, prevSessionTotals, prevModel, lookAheadMaxBytes } = opts;
 
@@ -362,6 +373,7 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
     }
     if (part.kind !== "line") continue;
     const line = part.text;
+    if (!seedActive && !mayMatter(line)) continue;
 
     let raw: CodexLine;
     try {
@@ -417,7 +429,7 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
         messageId: `${sessionId}:${tsStr}:user:${ixForTs}`,
         requestId: null,
         timestamp,
-        model: await resolveModel(),
+        model: currentModel ?? (await resolveModel()),
         messageType: "user",
         inputTokens: 0,
         outputTokens: 0,
@@ -550,7 +562,7 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
 
     const eventModel = extractModel(raw);
     if (eventModel) currentModel = eventModel;
-    const model = await resolveModel();
+    const model = currentModel ?? (await resolveModel());
 
     // Codex reports `input_tokens` INCLUSIVE of both `cached_input_tokens`
     // and `cache_write_input_tokens` (openai/codex parses_cache_write_token_usage:

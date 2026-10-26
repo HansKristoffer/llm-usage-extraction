@@ -1,6 +1,7 @@
 export * from "./claude-code.ts";
 export * from "./codex.ts";
 export * from "./collect.ts";
+export * from "./cursor-api.ts";
 export * from "./cursor-jsonl.ts";
 export * from "./cursor-local.ts";
 export * from "./paths.ts";

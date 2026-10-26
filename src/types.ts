@@ -1,5 +1,11 @@
-export type Source = "claude_code" | "claude_cowork" | "codex" | "cursor_local";
+/**
+ * `cursor_api` is the same Cursor usage as `cursor_local`, as Cursor's dashboard reports it: enable
+ * one or the other, not both. `grok_bot` rows come from that dashboard too.
+ */
+export type Source = "claude_code" | "claude_cowork" | "codex" | "cursor_local" | "cursor_api" | "grok_bot";
 
+/** The sources read from local files. The dashboard sources are left out, so enabling all of these
+ *  never sends the user's Cursor login anywhere. */
 export const SOURCES: readonly Source[] = ["claude_code", "claude_cowork", "codex", "cursor_local"];
 
 export type MessageType = "user" | "assistant";
@@ -21,6 +27,9 @@ export interface TokenEvent {
   cacheCreationTokens: number;
   cacheReadTokens: number;
   reasoningTokens: number | null;
+  /** Cents Cursor's dashboard charged for the request (`cursor_api` and `grok_bot`); null when it
+   *  reported none. Absent for local sources. */
+  costCents?: number | null;
 }
 
 export interface FileState {
@@ -46,4 +55,6 @@ export interface FileState {
 export interface ExtractState {
   files: Record<string, FileState>;
   cursorLocal?: { dbPath: string; lastRowid: number };
+  /** The Cursor account last read from the dashboard, and when the whole window was read. */
+  cursorApi?: { accountId: string; checkedAt: number };
 }

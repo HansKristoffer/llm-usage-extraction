@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { parseClaudeCodeFile } from "./claude-code.ts";
 import { parseCodexFile } from "./codex.ts";
+import { type CursorCredentials, fetchCursorUsagePages, loadCursorCredentials } from "./cursor-api.ts";
 import { parseCursorTranscriptFile } from "./cursor-jsonl.ts";
 import { parseCursorLocal } from "./cursor-local.ts";
 import {
@@ -95,8 +96,17 @@ export interface CollectOptions {
   /** Message keys already taken this run. A long-running caller can pass a smaller set, such as one
    *  of hashes. Defaults to a `Set` of the keys. */
   seen?: { has: (key: string) => boolean; add: (key: string) => unknown };
+  /** For `cursor_api`: replaces reading the login from `state.vscdb`, and `fetch`. */
+  cursorCredentials?: () => CursorCredentials;
+  cursorFetch?: typeof fetch;
+  now?: () => number;
   onError?: (err: unknown, where: string) => void;
 }
+
+/** How often `cursor_api` asks Cursor's dashboard, and how far back it re-reads: Cursor can publish
+ *  a request's usage after it finished. */
+const CURSOR_API_EVERY_MS = 15 * 60_000;
+const CURSOR_API_OVERLAP_MS = 7 * 24 * 60 * 60_000;
 
 /** Files stat'ed at once. */
 const STAT_BATCH = 64;
@@ -193,6 +203,44 @@ export async function* collect(state: ExtractState, opts: CollectOptions): Async
         };
       } catch (err) {
         opts.onError?.(err, `parse:${dbPath}`);
+      }
+    }
+  }
+
+  // The dashboard's whole window is checkpointed once its last page is read; an earlier failure
+  // re-reads the window, with the same message ids, next time.
+  const now = (opts.now ?? Date.now)();
+  if (
+    (opts.enabled.has("cursor_api") || opts.enabled.has("grok_bot")) &&
+    now - (state.cursorApi?.checkedAt ?? 0) >= CURSOR_API_EVERY_MS
+  ) {
+    const dbPath = opts.cursorDbPath ?? cursorStateDbPath();
+    if (opts.cursorCredentials || (await mtimeOf(dbPath)) !== null) {
+      try {
+        const credentials = opts.cursorCredentials ?? (() => loadCursorCredentials(dbPath));
+        const accountId = credentials().accountId;
+        const since =
+          state.cursorApi?.accountId === accountId
+            ? Math.max(0, state.cursorApi.checkedAt - CURSOR_API_OVERLAP_MS)
+            : 0;
+        for await (const r of fetchCursorUsagePages({
+          dbPath,
+          since,
+          until: now,
+          credentials,
+          expectedAccountId: accountId,
+          fetch: opts.cursorFetch,
+        })) {
+          take(r.events.filter((e) => opts.enabled.has(e.source)));
+          const batch = flush();
+          yield {
+            events: batch.events,
+            commit: (s) =>
+              r.done ? { ...batch.commit(s), cursorApi: { accountId, checkedAt: now } } : batch.commit(s),
+          };
+        }
+      } catch (err) {
+        opts.onError?.(err, "cursor_api");
       }
     }
   }

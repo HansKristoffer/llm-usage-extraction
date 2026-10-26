@@ -1,0 +1,72 @@
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish again (for example v1.0.1)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+  publish:
+    needs: release-please
+    if: always() && (needs.release-please.outputs.created == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate the release tag
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName
+      # Keep the recovery tools from this workflow commit, even for an older tag.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Keep package verification tools
+        run: |
+          cp scripts/verify-package.mjs "$RUNNER_TEMP/verify-package.mjs"
+          cp scripts/publish-package.mjs "$RUNNER_TEMP/publish-package.mjs"
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Check package and tag versions agree
+        run: node -e 'if (require("./package.json").version !== process.env.TAG.slice(1)) process.exit(1)'
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun test
+      - run: node "$RUNNER_TEMP/verify-package.mjs"
+      - name: Publish the verified tarball
+        run: node "$RUNNER_TEMP/publish-package.mjs"

@@ -1,6 +1,6 @@
 # llm-usage-extraction
 
-Reads token usage from the session logs that AI coding agents write on your machine. Shared by [tokenmaxxing](https://github.com/HansKristoffer/tokenmaxxing) and [agentgate](https://github.com/HansKristoffer/agentgate). Bun only.
+Reads token usage from the session logs that AI coding agents write on your machine, and optionally from Cursor's usage dashboard. Shared by [tokenmaxxing](https://github.com/HansKristoffer/tokenmaxxing) and [agentgate](https://github.com/HansKristoffer/agentgate). Bun only.
 
 | Source          | Where it reads                                                                                                                                                                       |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -8,8 +8,12 @@ Reads token usage from the session logs that AI coding agents write on your mach
 | `claude_cowork` | Claude Desktop's local agent sessions (`CLAUDE_COWORK_DIR`)                                                                                                                          |
 | `codex`         | `~/.codex/sessions/` and `archived_sessions/` (`CODEX_HOME`), the rollouts listed in `state_*.sqlite` (`CODEX_SQLITE_HOME`), and PostHog Desktop's `<posthog>/codex-home/*/sessions` |
 | `cursor_local`  | Cursor's `state.vscdb` (`CURSOR_DATA_DIR`) and agent transcripts (`CURSOR_PROJECTS_DIR`)                                                                                             |
+| `cursor_api`    | Cursor's usage dashboard, signed in with the token in `state.vscdb`. Opt-in                                                                                                          |
+| `grok_bot`      | Grok Bot's rows on that same dashboard. Opt-in                                                                                                                                       |
 
 App data lives in `~/Library/Application Support` on macOS, `%APPDATA%` on Windows and `$XDG_CONFIG_HOME` (or `~/.config`) on Linux. `<posthog>` is `@posthog/posthog-code` there, or `POSTHOG_DESKTOP_DIR`.
+
+`cursor_api` is the same Cursor usage as `cursor_local`, as Cursor counted and charged it, with `costCents`. Enable one of the two, never both, or Cursor is counted twice. The dashboard sources send the user's Cursor login to `cursor.com`, so `SOURCES` leaves them out: enable them by name. `collect` asks the dashboard at most every 15 minutes and re-reads the last 7 days, because Cursor can publish a request's usage after it finished. The checkpoint moves only once the whole window is read.
 
 Each model turn becomes a `TokenEvent`: input, output, cache read, cache write and reasoning tokens, with session, message id, model and timestamp. Message content is never read into an event.
 
@@ -35,7 +39,7 @@ for await (const batch of collect(state, { enabled: new Set(["claude_code", "cod
 
 Persist `state` between runs to read only new lines. `dirs` reads only the given folders for a source instead of its default locations, for example `{ claude_code: [ownDir, otherDir] }`. `seen` replaces the set of message keys used to drop repeats within a run; a long-running process reading GBs of logs can pass a smaller one, such as `{ has: (k) => hashes.has(Bun.hash(k)), add: (k) => hashes.add(Bun.hash(k)) }`.
 
-The parsers (`parseClaudeCodeFile`, `parseCodexFile`, `parseCursorTranscriptFile`, `parseCursorLocal`) and the file listers (`listClaudeCodeFiles(dir?)` and friends) are exported for callers that walk other directories. A lister given a `dir` reads only that folder; with none it reads every default location.
+The parsers (`parseClaudeCodeFile`, `parseCodexFile`, `parseCursorTranscriptFile`, `parseCursorLocal`, and `fetchCursorUsagePages` for the dashboard) and the file listers (`listClaudeCodeFiles(dir?)` and friends) are exported for callers that walk other directories. A lister given a `dir` reads only that folder; with none it reads every default location.
 
 ## What it handles
 

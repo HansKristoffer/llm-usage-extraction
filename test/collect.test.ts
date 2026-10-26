@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collect } from "../src/collect.ts";
+import { type CollectOptions, collect } from "../src/collect.ts";
 import type { ExtractState, Source, TokenEvent } from "../src/types.ts";
 
 let dir: string;
@@ -16,7 +16,7 @@ const line = (id: string) =>
     message: { id, model: "claude-opus-5", usage: { input_tokens: 1, output_tokens: 2 } },
   })}\n`;
 
-async function drain(state: ExtractState, opts = { enabled }) {
+async function drain(state: ExtractState, opts: CollectOptions = { enabled }) {
   const events: TokenEvent[] = [];
   for await (const batch of collect(state, opts)) {
     events.push(...batch.events);
@@ -28,11 +28,13 @@ async function drain(state: ExtractState, opts = { enabled }) {
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "lue-collect-"));
   process.env.CLAUDE_CONFIG_DIR = join(dir, "claude");
+  process.env.POSTHOG_DESKTOP_DIR = join(dir, "posthog");
   await mkdir(join(dir, "claude", "projects", "p"), { recursive: true });
 });
 
 afterEach(async () => {
   delete process.env.CLAUDE_CONFIG_DIR;
+  delete process.env.POSTHOG_DESKTOP_DIR;
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -63,4 +65,24 @@ test("commit keeps the caller's own state fields", async () => {
 test("disabled sources are skipped", async () => {
   await writeFile(join(dir, "claude", "projects", "p", "s1.jsonl"), line("m1"));
   expect((await drain({ files: {} }, { enabled: new Set() })).events).toHaveLength(0);
+});
+
+test("dirs replace a source's default locations", async () => {
+  await writeFile(join(dir, "claude", "projects", "p", "s1.jsonl"), line("m1"));
+  const homes = [join(dir, "own"), join(dir, "private")];
+  await Promise.all(homes.map((home) => mkdir(join(home, "p"), { recursive: true })));
+  await writeFile(join(homes[0]!, "p", "a.jsonl"), line("m2"));
+  await writeFile(join(homes[1]!, "p", "b.jsonl"), line("m3"));
+  const { events } = await drain({ files: {} }, { enabled, dirs: { claude_code: homes } });
+  expect(events.map((e) => e.messageId).sort()).toEqual(["m2", "m3"]);
+});
+
+test("a caller's seen set drops repeats across files", async () => {
+  await writeFile(join(dir, "claude", "projects", "p", "s1.jsonl"), line("m1"));
+  await writeFile(join(dir, "claude", "projects", "p", "s2.jsonl"), line("m1") + line("m2"));
+  const hashes = new Set<number | bigint>();
+  const seen = { has: (k: string) => hashes.has(Bun.hash(k)), add: (k: string) => hashes.add(Bun.hash(k)) };
+  const { events } = await drain({ files: {} }, { enabled, seen });
+  expect(events.map((e) => e.messageId).sort()).toEqual(["m1", "m2"]);
+  expect(hashes.size).toBe(2);
 });

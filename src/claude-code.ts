@@ -50,6 +50,18 @@ function isNum(v: unknown): v is number {
 }
 
 /**
+ * Whether a line could be an event, before paying for `JSON.parse`: most of a log's bytes are tool
+ * results, attachments and request blobs. An assistant event has a `usage` block and a user one has
+ * `"type":"user"`; a line with no usage that holds a tool result is never a prompt. Claude Code
+ * writes compact JSON, so the type is matched with no space: a bare `"user"` would also match the
+ * `"role":"user"` inside big attachment and request lines, and parse them for nothing.
+ */
+const mayBeEvent = (line: string): boolean =>
+  line.includes('"usage"')
+    ? line.includes('"type":"assistant"') || line.includes('"type":"user"')
+    : line.includes('"type":"user"') && !line.includes('"tool_result"');
+
+/**
  * Tail-read a Claude Code session jsonl file from `byteOffset`.
  *
  * Returns parsed events plus a new byte offset that points at the start of
@@ -80,6 +92,10 @@ export async function parseClaudeCodeFile(opts: ParseClaudeCodeOptions): Promise
   const events: TokenEvent[] = [];
   const seenDedupKeys: string[] = [];
   const localSeen = new Set<string>();
+  // Claude Code writes one line per content block of a response, all with the
+  // same message id, and only the last carries the final output_tokens. So a
+  // repeat updates the event already taken.
+  const assistantAt = new Map<string, TokenEvent>();
   // Advance only past fully-terminated lines; a partial trailing line keeps
   // the offset put so the next read re-consumes it once it's complete.
   let newOffset = byteOffset;
@@ -95,6 +111,7 @@ export async function parseClaudeCodeFile(opts: ParseClaudeCodeOptions): Promise
     }
     if (part.kind !== "line") continue;
     const line = part.text;
+    if (!mayBeEvent(line)) continue;
 
     let raw: RawCCRecord;
     try {
@@ -148,10 +165,8 @@ export async function parseClaudeCodeFile(opts: ParseClaudeCodeOptions): Promise
 
     // Assistant path — must have a usage block and an API message id.
     if (!isString(msg.id)) continue;
-    const dedupKey = `${msg.id}:${requestId ?? ""}`;
-    if (localSeen.has(dedupKey)) continue;
     if (!msg.usage) continue;
-    localSeen.add(dedupKey);
+    const dedupKey = `${msg.id}:${requestId ?? ""}`;
 
     const usage = msg.usage;
     const inputTokens = isNum(usage.input_tokens) ? usage.input_tokens : 0;
@@ -165,7 +180,18 @@ export async function parseClaudeCodeFile(opts: ParseClaudeCodeOptions): Promise
       continue;
     }
 
-    events.push({
+    const taken = assistantAt.get(dedupKey);
+    if (taken) {
+      // A response split across two reads arrives twice with the same ids; keep the larger numbers.
+      Object.assign(taken, {
+        inputTokens,
+        outputTokens,
+        cacheCreationTokens: cacheCreation,
+        cacheReadTokens: cacheRead,
+      });
+      continue;
+    }
+    const event: TokenEvent = {
       source,
       sessionId,
       agentId,
@@ -181,7 +207,9 @@ export async function parseClaudeCodeFile(opts: ParseClaudeCodeOptions): Promise
       cacheCreationTokens: cacheCreation,
       cacheReadTokens: cacheRead,
       reasoningTokens: null,
-    });
+    };
+    assistantAt.set(dedupKey, event);
+    events.push(event);
     seenDedupKeys.push(dedupKey);
   }
 

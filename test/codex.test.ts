@@ -1,5 +1,7 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseCodexFile, type SessionTotals } from "../src/codex.ts";
@@ -1224,5 +1226,117 @@ describe("replayed token_count records", () => {
     const r = await parseCodexFile({ path, byteOffset: 0 });
     expect(r.events.length).toBe(1);
     expect(r.replayedSkipped).toBe(1);
+  });
+});
+
+describe("listCodexFiles", () => {
+  // The list is real paths, and macOS's tmpdir() is /var/…, a link to /private/var/…: homes are real paths too.
+  async function withHome(home: string, fn: () => Promise<void>, sqliteHome?: string) {
+    const prev = process.env.CODEX_HOME;
+    const prevSqlite = process.env.CODEX_SQLITE_HOME;
+    const prevPosthog = process.env.POSTHOG_DESKTOP_DIR;
+    process.env.CODEX_HOME = home;
+    process.env.POSTHOG_DESKTOP_DIR = join(home, "no-posthog");
+    if (sqliteHome === undefined) delete process.env.CODEX_SQLITE_HOME;
+    else process.env.CODEX_SQLITE_HOME = sqliteHome;
+    try {
+      await fn();
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = prev;
+      if (prevSqlite === undefined) delete process.env.CODEX_SQLITE_HOME;
+      else process.env.CODEX_SQLITE_HOME = prevSqlite;
+      if (prevPosthog === undefined) delete process.env.POSTHOG_DESKTOP_DIR;
+      else process.env.POSTHOG_DESKTOP_DIR = prevPosthog;
+    }
+  }
+
+  function writeThreads(dbPath: string, rows: { rolloutPath: string | null; tokensUsed?: number }[]) {
+    const db = new Database(dbPath);
+    db.exec(
+      "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, tokens_used INTEGER NOT NULL DEFAULT 0)",
+    );
+    const insert = db.query("INSERT INTO threads (id, rollout_path, tokens_used) VALUES (?, ?, ?)");
+    for (const [i, row] of rows.entries()) insert.run(String(i), row.rolloutPath, row.tokensUsed ?? 0);
+    db.close();
+  }
+
+  it("includes archived rollouts, which the apps move out of sessions/", async () => {
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "codex-home-")));
+    const live = join(home, "sessions", "2026", "10", "05", "rollout-a.jsonl");
+    const archived = join(home, "archived_sessions", "rollout-b.jsonl");
+    for (const f of [live, archived]) {
+      await mkdir(join(f, ".."), { recursive: true });
+      await writeFile(f, "");
+    }
+    await withHome(home, async () => {
+      expect((await listCodexFiles()).sort()).toEqual([archived, live].sort());
+    });
+  });
+
+  it("reads rollout files the state database points at, and does not invent tokens from tokens_used", async () => {
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "codex-home-")));
+    const outside = await mkdtemp(join(tmpdir(), "codex-outside-"));
+    const sqliteHome = await mkdtemp(join(tmpdir(), "codex-sqlite-"));
+    const live = join(home, "sessions", "2026", "10", "05", "rollout-a.jsonl");
+    const archived = join(home, "archived_sessions", "rollout-b.jsonl");
+    const extra = join(home, "imported", "rollout-extra.jsonl");
+    const escaped = join(outside, "rollout-secret.jsonl");
+    const history = join(home, "history.jsonl");
+    for (const f of [live, archived, extra, escaped, history]) {
+      await mkdir(join(f, ".."), { recursive: true });
+      await writeFile(f, "");
+    }
+    writeThreads(join(home, "state_5.sqlite"), [
+      { rolloutPath: live, tokensUsed: 1_000 },
+      { rolloutPath: extra, tokensUsed: 4_000 },
+      { rolloutPath: escaped, tokensUsed: 9_000 },
+      { rolloutPath: join(home, "missing", "rollout-gone.jsonl"), tokensUsed: 50_000_000 },
+      { rolloutPath: null, tokensUsed: 50_000_000 },
+    ]);
+    await mkdir(join(sqliteHome, "sqlite"), { recursive: true });
+    const relocated = join(home, "relocated", "rollout-from-sqlite-home.jsonl");
+    await mkdir(join(relocated, ".."), { recursive: true });
+    await writeFile(relocated, "");
+    writeThreads(join(sqliteHome, "sqlite", "state_5.sqlite"), [{ rolloutPath: relocated, tokensUsed: 3 }]);
+    // Not a thread catalog. A failure here must not hide the real rollouts.
+    await writeFile(join(home, "state_9.sqlite"), "not a database");
+    await withHome(
+      home,
+      async () => {
+        expect((await listCodexFiles()).sort()).toEqual([archived, extra, live, relocated].sort());
+      },
+      sqliteHome,
+    );
+  });
+
+  it("sees threads added to the state database since the last list", async () => {
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "codex-home-")));
+    const first = join(home, "imported", "rollout-1.jsonl");
+    const second = join(home, "imported", "rollout-2.jsonl");
+    await mkdir(join(first, ".."), { recursive: true });
+    for (const f of [first, second]) await writeFile(f, "");
+    const dbPath = join(home, "state_5.sqlite");
+    writeThreads(dbPath, [{ rolloutPath: first }]);
+    await withHome(home, async () => {
+      expect(await listCodexFiles()).toEqual([first]);
+      const db = new Database(dbPath);
+      db.query("INSERT INTO threads (id, rollout_path) VALUES ('b', ?)").run(second);
+      db.close();
+      expect((await listCodexFiles()).sort()).toEqual([first, second].sort());
+    });
+  });
+
+  it("keeps session rollouts when the state database has no threads table", async () => {
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "codex-home-")));
+    const live = join(home, "sessions", "rollout-a.jsonl");
+    await mkdir(join(live, ".."), { recursive: true });
+    await writeFile(live, "");
+    const db = new Database(join(home, "state_5.sqlite"));
+    db.exec("CREATE TABLE notes (body TEXT)");
+    db.close();
+    await withHome(home, async () => {
+      expect(await listCodexFiles()).toEqual([live]);
+    });
   });
 });

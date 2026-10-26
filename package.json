@@ -1,0 +1,39 @@
+{
+  "name": "llm-usage-extraction",
+  "version": "0.1.0",
+  "description": "Read token usage from the local session logs of Claude Code, Claude Cowork, Codex and Cursor",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HansKristoffer/llm-usage-extraction.git"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "cursor",
+    "token-usage",
+    "bun"
+  ],
+  "type": "module",
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "files": [
+    "src"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome ci .",
+    "format": "biome check --write .",
+    "check": "bun run typecheck && bun run lint && bun test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@types/bun": "latest",
+    "typescript": "^5.9.0"
+  }
+}

@@ -132,7 +132,7 @@ describe("parseCursorLocal", () => {
     expect(r.events[0]!.timestamp).toBe(1_780_000_000_000);
   });
 
-  it("rounds fractional db mtime to an integer timestamp (server rejects floats)", () => {
+  it("rounds fractional db mtime to an integer timestamp (timestamps are integer ms)", () => {
     const { dbPath } = makeCursorDb([
       {
         key: "bubbleId:comp-3:bubble-3",

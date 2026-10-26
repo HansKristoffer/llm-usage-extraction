@@ -97,7 +97,7 @@ describe("parseClaudeCodeFile (synthetic)", () => {
     expect(r.events[0]!.source).toBe("claude_code");
   });
 
-  it("never emits an empty sessionId or assistant model (server would reject)", async () => {
+  it("never emits an empty sessionId or assistant model (callers key and price by them)", async () => {
     // A record missing sessionId / model must not yield "" — the ingest
     // validator rejects empty sessionId and empty assistant model, which used
     // to 400 a whole batch. Fall back to the filename sessionId + "unknown".

@@ -114,7 +114,7 @@ describe("parseCursorTranscriptFile", () => {
     expect(second.nextLineIndex).toBe(3);
   });
 
-  it("rounds fractional file mtime to an integer timestamp (server rejects floats)", async () => {
+  it("rounds fractional file mtime to an integer timestamp (timestamps are integer ms)", async () => {
     const { path } = makeTranscriptFile([
       JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "hi" }] } }),
     ]);

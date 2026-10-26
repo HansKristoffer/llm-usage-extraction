@@ -15,7 +15,7 @@ export interface ParseClaudeCodeResult {
   newOffset: number;
   seenDedupKeys: string[];
   /** Count of records dropped because they exceeded the read window (data
-   *  loss — surfaced so the daemon can warn). Absent/0 in the common case. */
+   *  loss — surfaced so the caller can warn). Absent/0 in the common case. */
   oversizeSkipped?: number;
 }
 
@@ -53,7 +53,7 @@ function isNum(v: unknown): v is number {
  * Tail-read a Claude Code session jsonl file from `byteOffset`.
  *
  * Returns parsed events plus a new byte offset that points at the start of
- * any partial trailing line, so the next tick re-reads it fully. Emits one
+ * any partial trailing line, so the next read re-reads it fully. Emits one
  * event per assistant line with a `message.usage` block (token-bearing), and
  * one zero-token messageType='user' event per HUMAN prompt line.
  *
@@ -66,8 +66,8 @@ export async function parseClaudeCodeFile(opts: ParseClaudeCodeOptions): Promise
   const { path, byteOffset } = opts;
   const source: Source = opts.source ?? "claude_code";
   // CC/Cowork session files are named <sessionId>.jsonl, so the filename is a
-  // stable, meaningful fallback for any record that omits sessionId. The
-  // server rejects an empty sessionId, and skipping the event would drop real
+  // stable, meaningful fallback for any record that omits sessionId. An empty
+  // sessionId is useless as a key, and skipping the event would drop real
   // token usage — so never emit "".
   const fallbackSessionId = basename(path, ".jsonl") || "unknown";
 
@@ -172,7 +172,7 @@ export async function parseClaudeCodeFile(opts: ParseClaudeCodeOptions): Promise
       messageId: msg.id,
       requestId,
       timestamp,
-      // Assistant rows require a non-empty model server-side; "unknown" keeps
+      // Callers group and price by model; "unknown" keeps
       // the token usage rather than dropping it on the rare missing-model line.
       model: isString(msg.model) ? msg.model : "unknown",
       messageType: "assistant",

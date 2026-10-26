@@ -5,7 +5,7 @@ import type { MessageType, TokenEvent } from "./types.ts";
 /** Fallback model when Cursor's local DB omits one (PricingCache path). */
 export const CURSOR_LOCAL_FALLBACK_MODEL = "cursor";
 
-/** Cap rows per tick so a first-run backfill cannot wedge a single POST. */
+/** Cap rows per read so a first-run backfill comes back in bounded batches. */
 export const CURSOR_LOCAL_BATCH_LIMIT = 5000;
 
 export interface ParseCursorLocalOptions {
@@ -259,7 +259,7 @@ function openCursorDatabase(dbPath: string): Database | null {
 /**
  * Read new Cursor composer bubbles from the local state.vscdb SQLite file.
  * Uses rowid watermarking — REPLACE updates get a fresh rowid and are seen
- * again (server dedup keeps the first emission).
+ * again (a caller deduping on messageId keeps the first emission).
  */
 export function parseCursorLocal(opts: ParseCursorLocalOptions): ParseCursorLocalResult {
   const { dbPath, lastRowid } = opts;

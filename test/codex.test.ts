@@ -256,7 +256,7 @@ describe("parseCodexFile (synthetic)", () => {
           reasoning: 0,
         }),
       ),
-      // Server reports lower totals — simulates reset.
+      // Lower totals than before — simulates a reset.
       JSON.stringify(
         tokenCountEvent("2026-05-01T00:00:02.000Z", null, {
           input: 30,
@@ -321,7 +321,7 @@ describe("parseCodexFile (synthetic)", () => {
       ),
     ]);
     const r = await parseCodexFile({ path, byteOffset: 0 });
-    expect(r.events[0]!.model).toBe("gpt-5");
+    expect(r.events[0]!.model).toBe("unknown");
   });
 
   it("normalizes Codex cached-as-subset-of-input: input=10 cached=4 → input=6 cacheRead=4", async () => {
@@ -602,13 +602,10 @@ describe("parseCodexFile (real local data)", () => {
   });
 });
 
-// The mislabelling bug: `turn_context` is written once per TURN, but the
-// daemon reads incrementally every 300s. A read that opens after the
-// turn_context line saw usage with no model in its window and billed it to
-// LEGACY_FALLBACK_MODEL — a model nobody ran. On prod this swallowed 41.5%
-// of all Codex volume (71.6% in its worst month) and priced it at a quarter
-// of the real rate, because the placeholder is cheaper than the models it
-// was standing in for.
+// `turn_context` is written once per TURN, but callers read incrementally. A
+// read that opens after the turn_context line sees usage with no model in its
+// window. Without the carried model it falls back — in tokenmaxxing that once
+// mislabelled 41.5% of all Codex volume.
 describe("model carries across incremental reads", () => {
   async function writeSession(lines: unknown[]): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "codex-model-"));
@@ -671,7 +668,7 @@ describe("model carries across incremental reads", () => {
     ]);
     // byteOffset > 0 with no prevModel is the pre-fix situation.
     const r = await parseCodexFile({ path, byteOffset: 0 });
-    expect(r.events[0]?.model).toBe("gpt-5");
+    expect(r.events[0]?.model).toBe("unknown");
     expect(r.lastModel).toBeUndefined();
   });
 
@@ -687,7 +684,7 @@ describe("model carries across incremental reads", () => {
     // byteOffset 0 starts blind on purpose: a byte-0 read sees the file's
     // own first turn_context, so trusting a stale carried model there would
     // mislabel a session that legitimately changed models.
-    expect(r.events[0]?.model).toBe("gpt-5");
+    expect(r.events[0]?.model).toBe("unknown");
   });
 
   it("a later turn_context overrides the carried model", async () => {
@@ -705,10 +702,9 @@ describe("model carries across incremental reads", () => {
   });
 });
 
-// v0.6.4 carried the model across incremental reads, but a byte-0 read still
-// started blind — and some rollouts write token_count / user-prompt lines
-// BEFORE their first `turn_context`, so that prefix kept billing to
-// LEGACY_FALLBACK_MODEL. The answer is sitting further down the same file, so
+// Incremental reads carry the model in, but a byte-0 read starts blind — and
+// some rollouts write token_count / user-prompt lines BEFORE their first
+// `turn_context`, so that prefix would fall back. The answer is sitting further down the same file, so
 // a bounded look-ahead recovers it (see LOOKAHEAD_MAX_BYTES in codex.ts).
 describe("byte-0 model look-ahead", () => {
   const userLine = (ts: string) => ({
@@ -741,9 +737,8 @@ describe("byte-0 model look-ahead", () => {
   });
 
   it("gives up cleanly when the look-ahead is disabled", async () => {
-    // The peek is the only thing labelling this prefix (test 1 above is the
-    // pre-v0.6.5 regression guard — it fails against the v0.6.4 parser).
-    // Turning it off must fall back rather than misbehave.
+    // The peek is the only thing labelling this prefix (test 1 above guards
+    // it). Turning it off must fall back rather than misbehave.
     const path = await makeTempJsonl("rollout-lookahead-prefix.jsonl", [
       JSON.stringify(
         tokenCountEvent(
@@ -755,7 +750,7 @@ describe("byte-0 model look-ahead", () => {
       JSON.stringify(turnContextLine("gpt-5.6-sol", "2026-08-01T00:00:02.000Z")),
     ]);
     const r = await parseCodexFile({ path, byteOffset: 0, lookAheadMaxBytes: 0 });
-    expect(r.events[0]!.model).toBe("gpt-5");
+    expect(r.events[0]!.model).toBe("unknown");
   });
 
   it("gives up at the cap instead of scanning an unbounded file", async () => {
@@ -777,7 +772,7 @@ describe("byte-0 model look-ahead", () => {
     ]);
     const capped = await parseCodexFile({ path, byteOffset: 0, lookAheadMaxBytes: 512 });
     // Past the cap we keep the fallback rather than invent a model...
-    expect(capped.events[0]!.model).toBe("gpt-5");
+    expect(capped.events[0]!.model).toBe("unknown");
     // ...and the turn_context still lands normally once the parse reaches it.
     expect(capped.lastModel).toBe("gpt-5.6-sol");
     const uncapped = await parseCodexFile({ path, byteOffset: 0 });
@@ -834,7 +829,7 @@ describe("byte-0 model look-ahead", () => {
       ),
     ]);
     const r = await parseCodexFile({ path, byteOffset: 0 });
-    expect(r.events.map((e) => e.model)).toEqual(["gpt-5", "gpt-5"]);
+    expect(r.events.map((e) => e.model)).toEqual(["unknown", "unknown"]);
     expect(r.lastModel).toBeUndefined();
   });
 
@@ -890,7 +885,7 @@ describe("byte-0 model look-ahead", () => {
     expect(withPeek.events[0]!.inputTokens + withPeek.events[0]!.cacheReadTokens).toBe(51000);
     // The peek changes the label and nothing else.
     expect(withPeek.events[0]!.model).toBe("gpt-5.6-sol");
-    expect(noPeek.events[0]!.model).toBe("gpt-5");
+    expect(noPeek.events[0]!.model).toBe("unknown");
     expect(withPeek.events.map((e) => e.messageId)).toEqual(noPeek.events.map((e) => e.messageId));
     expect(withPeek.newOffset).toBe(noPeek.newOffset);
     expect(withPeek.sessionTotals).toEqual(noPeek.sessionTotals);
@@ -935,8 +930,8 @@ describe("byte-0 model look-ahead", () => {
         if (a.model === b.model) continue;
         // The peek may only turn the fallback into a real model, never the
         // other way round and never one real model into another.
-        expect(b.model).toBe("gpt-5");
-        expect(a.model).not.toBe("gpt-5");
+        expect(b.model).toBe("unknown");
+        expect(a.model).not.toBe("unknown");
         relabelled++;
       }
     }
@@ -1030,7 +1025,7 @@ describe("cumulative cache-write on the totals path", () => {
     expect(r2.sessionTotals.cacheWriteInputTokens).toBe(90);
   });
 
-  it("treats a pre-v0.6.5 state file with no cache-write field as 0", async () => {
+  it("treats a saved state with no cache-write field as 0", async () => {
     const path = await makeTempJsonl("rollout-cw-legacy-state.jsonl", [
       JSON.stringify(turnContextLine("gpt-5.5")),
       JSON.stringify(
@@ -1043,7 +1038,7 @@ describe("cumulative cache-write on the totals path", () => {
         }),
       ),
     ]);
-    // Exactly what an older daemon persisted: no cacheWriteInputTokens key.
+    // A state saved before the field existed: no cacheWriteInputTokens key.
     const legacy = {
       sessionId: "rollout-cw-legacy-state",
       inputTokens: 100,

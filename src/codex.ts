@@ -17,8 +17,8 @@ export interface SessionTotals {
    *  portion silently lands in plain input (billed at the full input rate).
    *  Inert while the source reports the field as a literal 0, which every
    *  rollout seen so far does — this exists so it stays correct the day it
-   *  isn't. Persisted in FileState, where a pre-v0.6.5 state file has no
-   *  such key; tick.ts reads a missing value as 0. */
+   *  isn't. A FileState saved before this field existed lacks it; the parser
+   *  reads a missing value as 0. */
   cacheWriteInputTokens: number;
   reasoningTokens: number;
 }
@@ -30,10 +30,8 @@ export interface ParseCodexOptions {
   /** Model in effect at the end of the PREVIOUS read of this same file.
    *  `turn_context` appears once per turn, not once per token_count line, so
    *  an incremental read that starts mid-turn sees usage with no model in
-   *  its window. Without this the model resolved to LEGACY_FALLBACK_MODEL
-   *  and the turn was billed to a model nobody ran — the dominant source of
-   *  mislabelled Codex volume. Persisted across ticks in FileState.lastModel
-   *  exactly like lastSessionTotals. */
+   *  its window. Without this the turn falls back to FALLBACK_MODEL. Persist
+   *  it in FileState.lastModel, like lastSessionTotals. */
   prevModel?: string;
   /** Override for the byte-0 look-ahead cap (see LOOKAHEAD_MAX_BYTES).
    *  A test seam: it lets the give-up path (and the pre-fix fallback
@@ -52,7 +50,7 @@ export interface ParseCodexResult {
    *  have no recoverable model and keep the fallback). */
   lastModel?: string;
   /** Count of records dropped because they exceeded the read window (data
-   *  loss — surfaced so the daemon can warn). Absent/0 in the common case. */
+   *  loss — surfaced so the caller can warn). Absent/0 in the common case. */
   oversizeSkipped?: number;
   /** Replayed token_count records skipped — the same request logged twice
    *  with an unmoved cumulative total. NOT data loss: billing them is the
@@ -92,7 +90,10 @@ interface CodexLine {
   };
 }
 
-const LEGACY_FALLBACK_MODEL = "gpt-5";
+/** Label for usage whose rollout never names its model (rollouts before 2025-11
+ *  have no turn_context). Matches the Claude parser; any real model name here
+ *  would be a guess, and would be priced as that model. */
+const FALLBACK_MODEL = "unknown";
 
 /**
  * Fork-seed suppression. When Codex spawns a subagent or forks/resumes a
@@ -120,15 +121,14 @@ const SEED_GAP_MS = 1500;
 /**
  * Byte-0 model look-ahead.
  *
- * v0.6.4 carried the model across INCREMENTAL reads (see prevModel), but a
+ * Incremental reads carry the model in (see prevModel), but a
  * byte-0 read deliberately starts blind: the file's own first `turn_context`
  * is the truth for a brand-new file, and trusting a stale carried model there
  * would mislabel a session that legitimately switched models.
  *
  * Some rollouts, though, write lines that need a model BEFORE their first
  * turn_context, so those events had nothing to resolve and fell back to
- * LEGACY_FALLBACK_MODEL — labelled with a model nobody ran, the same class of
- * bug v0.6.4 fixed. The answer is sitting further down the same file, so on a
+ * FALLBACK_MODEL. The answer is sitting further down the same file, so on a
  * byte-0 read we peek forward for its FIRST turn_context and seed from that.
  *
  * Measured over 1,149 real local rollouts:
@@ -154,9 +154,8 @@ const SEED_GAP_MS = 1500;
  * (turn_context first) never pay for it, and it runs at most once per parse.
  *
  * It is also forward-only: it changes the `model` column and nothing else,
- * and messageId is byte-identical before and after. Re-reading an already
- * posted rollout therefore hits the server's dedup and the stored row keeps
- * its old label — history is not repaired, only new/first reads are correct.
+ * and messageId is byte-identical before and after. A caller that dedups on
+ * messageId and already stored a row keeps that row's old label.
  */
 const LOOKAHEAD_MAX_BYTES = 32 * 1024 * 1024;
 
@@ -187,8 +186,8 @@ const LOOKAHEAD_WINDOW_BYTES = 1024 * 1024;
  * headroom while staying under the reader's own 64 MiB record ceiling. The 30
  * local rollouts with no turn_context at all are ≤1.04 MB each, so the give-up
  * path costs a short read, not a capped one. Past the cap the parse keeps the
- * fallback for the pre-turn_context prefix, exactly as it did before this
- * change — the cap trades a rarer recovery for a bounded read.
+ * fallback for the pre-turn_context prefix — the cap trades a rarer recovery
+ * for a bounded read.
  */
 async function lookAheadFirstTurnModel(
   file: ReturnType<typeof Bun.file>,
@@ -269,7 +268,7 @@ function readNum(...vals: Array<number | undefined>): number {
  * unique across re-reads of the same file. The event timestamp is high
  * resolution (millisecond ISO), and `ix` disambiguates events that share
  * the exact same timestamp inside this read. Combined with the sessionId
- * (filename), the key is globally unique enough for the daemon to dedup,
+ * (filename), the key is globally unique enough for a caller to dedup on,
  * and it's identical across reads because the timestamp is in the line.
  */
 function buildMessageId(sessionId: string, timestamp: string, ixForTimestamp: number): string {
@@ -282,7 +281,7 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
   const sessionId = basename(path, ".jsonl");
   const totals: SessionTotals =
     prevSessionTotals && prevSessionTotals.sessionId === sessionId
-      ? // A state file written before v0.6.5 has no cache-write key; a
+      ? // A state saved before cacheWriteInputTokens existed lacks it; a
         // missing cumulative is 0, never undefined (which would poison every
         // delta downstream with NaN). Measuring the first post-upgrade delta
         // from 0 rather than adopting the first observed cumulative is the
@@ -306,7 +305,7 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
   const file = Bun.file(path);
   const totalSize = file.size;
   if (byteOffset >= totalSize) {
-    // Nothing new to read — echo the model back so a no-op tick doesn't
+    // Nothing new to read — echo the model back so a no-op read doesn't
     // drop it and re-blind the next real read.
     return {
       events: [],
@@ -335,14 +334,14 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
       peeked = true;
       currentModel = await lookAheadFirstTurnModel(file, lookAheadMaxBytes);
     }
-    return currentModel ?? LEGACY_FALLBACK_MODEL;
+    return currentModel ?? FALLBACK_MODEL;
   };
   // Track how many events share an identical timestamp so messageIds stay unique.
   let lastTs = "";
   let ixForTs = 0;
   let oversizeSkipped = 0;
   // Replayed token_count records dropped this read (see the flat-cumulative
-  // guard below). Surfaced so the daemon can see how noisy a CLI version is.
+  // guard below). Surfaced so the caller can see how noisy a CLI version is.
   let replayedSkipped = 0;
   // Only compare against `totals` once this read (or a previous one) has
   // established a cumulative baseline: a fresh session legitimately starts
@@ -397,7 +396,7 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
     }
 
     // Codex logs user prompts as `response_item` lines with role="user".
-    // Emit a zero-token user event per occurrence so the server can compute
+    // Emit a zero-token user event per occurrence so callers can compute
     // user-vs-assistant message counts. The messageId is synthesized the
     // same way as token-count events but tagged with `:user:` so it can
     // never collide with an assistant-event id at the same timestamp.
@@ -455,7 +454,7 @@ export async function parseCodexFile(opts: ParseCodexOptions): Promise<ParseCode
     // than comparing `last`: the 248 flat records whose `last` DIFFERED all
     // carried zero tokens, so nothing billable is ever dropped by this test.
     // It also survives a read boundary for free, because `totals` is
-    // persisted across ticks in FileState.lastSessionTotals — a replay split
+    // persisted across reads in FileState.lastSessionTotals — a replay split
     // across two reads is still caught.
     if (
       cumTotal !== null &&

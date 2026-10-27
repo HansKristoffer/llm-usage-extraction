@@ -30,8 +30,11 @@ const page = (rows: unknown[], total = rows.length) =>
     usageEventsDisplay: rows,
     totalUsageEventsCount: total,
   });
-const fetcher = (fn: (input: string | URL | Request, init?: RequestInit) => Promise<Response>) =>
-  fn as typeof fetch;
+type Handler = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+/** A personal account: it belongs to no team. */
+const fetcher = (fn: Handler) =>
+  (async (input, init) =>
+    String(input).endsWith("/teams") ? Response.json({ teams: [] }) : fn(input, init)) as typeof fetch;
 /** Every page's events, and the account they're for. */
 async function fetchCursorUsage(
   opts: CursorApiOptions,
@@ -245,6 +248,55 @@ describe("Cursor dashboard", () => {
         ),
       }),
     ).rejects.toThrow("Incomplete Cursor usage response");
+  });
+
+  test("reads team-billed rows the user owns, once, keeping twins split by a page", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const ours = { owningUser: "42", owningTeam: 7 };
+    const teamRows = [
+      { ...row(), ...ours },
+      { ...row(), ...ours },
+      { ...row(), ...ours, model: "grok-bot-default" },
+      { ...row(), owningUser: 43, owningTeam: 7, model: "teammate" },
+      { ...row(), owningTeam: 7, model: "no-owner" },
+      { ...row(), owningUser: 42, owningTeam: 8, model: "other-team" },
+    ];
+    const r = await fetchCursorUsage({
+      ...options,
+      pageSize: 1,
+      fetch: (async (url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        if (url.endsWith("/teams")) return Response.json({ teams: [{ id: 7 }, { id: "7" }] });
+        if (url.endsWith("/team")) return Response.json({ userId: 42 });
+        // The personal call already has the first copy of the row.
+        if (!body.teamId) return page([row()]);
+        return page([teamRows[body.page - 1]], teamRows.length);
+      }) as typeof fetch,
+    });
+    expect(r.events.map((e) => [e.model, e.source])).toEqual([
+      ["claude-4.6-opus", "cursor_api"],
+      ["claude-4.6-opus", "cursor_api"],
+      ["grok-bot-default", "grok_bot"],
+    ]);
+    expect(new Set(r.events.map((e) => e.messageId)).size).toBe(3);
+    expect(bodies.filter((b) => b.teamId).every((b) => b.teamId === 7)).toBe(true);
+    expect(bodies.filter((b) => b.page && b.teamId).every((b) => b.userId === 42)).toBe(true);
+  });
+
+  test("a failed team read keeps personal rows but never finishes the window", async () => {
+    const pages: { events: number; done: boolean }[] = [];
+    await expect(
+      (async () => {
+        for await (const p of fetchCursorUsagePages({
+          ...options,
+          fetch: (async (url: string) =>
+            url.endsWith("/teams") ? new Response(null, { status: 500 }) : page([row()])) as typeof fetch,
+        }))
+          pages.push({ events: p.events.length, done: p.done });
+      })(),
+    ).rejects.toThrow("HTTP 500");
+    expect(pages).toEqual([{ events: 1, done: false }]);
   });
 
   test("does not fabricate tokens for requests without a breakdown", async () => {

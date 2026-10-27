@@ -13,7 +13,7 @@ Reads token usage from the session logs that AI coding agents write on your mach
 
 App data lives in `~/Library/Application Support` on macOS, `%APPDATA%` on Windows and `$XDG_CONFIG_HOME` (or `~/.config`) on Linux. `<posthog>` is `@posthog/posthog-code` there, or `POSTHOG_DESKTOP_DIR`.
 
-`cursor_api` is the same Cursor usage as `cursor_local`, as Cursor counted and charged it, with `costCents`. Enable one of the two, never both, or Cursor is counted twice. The dashboard sources send the user's Cursor login to `cursor.com`, so `SOURCES` leaves them out: enable them by name. `collect` asks the dashboard at most every 15 minutes and re-reads the last 7 days, because Cursor can publish a request's usage after it finished. The checkpoint moves only once the whole window is read.
+`cursor_api` is the same Cursor usage as `cursor_local`, as Cursor counted and charged it, with `costCents`. Enable one of the two, never both, or Cursor is counted twice. The dashboard sources send the user's Cursor login to `cursor.com`, so `SOURCES` leaves them out: enable them by name. `collect` asks the dashboard at most every 15 minutes and re-reads the last 7 days, because Cursor can publish a request's usage after it finished. The checkpoint moves only once the whole window is read. Besides the user's own usage, it reads each Cursor team the user belongs to and keeps only the rows that user owns, because usage billed to a team (Grok Bot's, for example) is missing from the personal read. A row both reads return counts once.
 
 Each model turn becomes a `TokenEvent`: input, output, cache read, cache write and reasoning tokens, with session, message id, model and timestamp. Message content is never read into an event.
 

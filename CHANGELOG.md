@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.2.0...v0.3.0) (2026-10-27)
+
+
+### Features
+
+* read team-billed Cursor usage the signed-in user owns ([#4](https://github.com/HansKristoffer/llm-usage-extraction/issues/4)) ([d353f7c](https://github.com/HansKristoffer/llm-usage-extraction/commit/d353f7cab7584c819732e4883ac5566299ce4fa3))
+
 ## [0.2.0](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.1.0...v0.2.0) (2026-10-26)
 
 

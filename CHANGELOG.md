@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.3.0...v0.3.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **cursor:** count Grok Bot usage when the model is blank ([#6](https://github.com/HansKristoffer/llm-usage-extraction/issues/6)) ([d3ad224](https://github.com/HansKristoffer/llm-usage-extraction/commit/d3ad224f566541f8989ddd24ebee2a4936a9affb))
+
 ## [0.3.0](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.2.0...v0.3.0) (2026-10-27)
 
 

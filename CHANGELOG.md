@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.3.1...v0.4.0) (2026-11-11)
+
+
+### Features
+
+* read OpenCode usage from its SQLite database ([#8](https://github.com/HansKristoffer/llm-usage-extraction/issues/8)) ([a376956](https://github.com/HansKristoffer/llm-usage-extraction/commit/a37695653edf0851d3ec36cb43e0ef0e6c545444))
+
 ## [0.3.1](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.3.0...v0.3.1) (2026-10-29)
 
 

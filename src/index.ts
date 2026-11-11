@@ -4,6 +4,7 @@ export * from "./collect.ts";
 export * from "./cursor-api.ts";
 export * from "./cursor-jsonl.ts";
 export * from "./cursor-local.ts";
+export * from "./opencode.ts";
 export * from "./paths.ts";
 export * from "./read-slice.ts";
 export * from "./types.ts";

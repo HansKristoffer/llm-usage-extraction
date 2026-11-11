@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { realpathSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 
@@ -40,6 +40,11 @@ export function codexSessionsDir(): string {
 export function cursorStateDbPath(): string {
   const dir = resolveDir(process.env.CURSOR_DATA_DIR, join(appSupport(), "Cursor", "User", "globalStorage"));
   return join(dir, "state.vscdb");
+}
+
+/** OpenCode's data dir: `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, on macOS and Windows too. */
+export function opencodeDataDir(): string {
+  return join(resolveDir(process.env.XDG_DATA_HOME, join(homedir(), ".local", "share")), "opencode");
 }
 
 export function cursorProjectsDir(): string {
@@ -190,4 +195,30 @@ function canonical(path: string): string | null {
 
 export function listCursorTranscriptFiles(dir = cursorProjectsDir()): Promise<string[]> {
   return scanGlob(dir, "**/agent-transcripts/**/*.jsonl");
+}
+
+/** `opencode.db`, or `opencode-<channel>.db` for a release channel such as a local build. */
+const OPENCODE_DB = /^opencode(-[\w.-]+)?\.db$/;
+
+/**
+ * OpenCode's databases. With a `dir`, the ones in it. With none, the ones in OpenCode's data dir,
+ * plus `OPENCODE_DB` (resolved against that dir, as OpenCode does) when it names another file.
+ */
+export function listOpencodeDbs(dir?: string): string[] {
+  const base = dir ?? opencodeDataDir();
+  let out: string[] = [];
+  try {
+    out = readdirSync(base)
+      .filter((f) => OPENCODE_DB.test(f))
+      .sort()
+      .map((f) => join(base, f));
+  } catch {
+    // dir missing
+  }
+  const custom = process.env.OPENCODE_DB;
+  if (dir === undefined && custom && custom !== ":memory:") {
+    const path = isAbsolute(custom) ? custom : join(base, custom);
+    if (!out.includes(path) && statSync(path, { throwIfNoEntry: false })?.isFile()) out.push(path);
+  }
+  return out;
 }

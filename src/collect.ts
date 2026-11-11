@@ -4,12 +4,14 @@ import { parseCodexFile } from "./codex.ts";
 import { type CursorCredentials, fetchCursorUsagePages, loadCursorCredentials } from "./cursor-api.ts";
 import { parseCursorTranscriptFile } from "./cursor-jsonl.ts";
 import { parseCursorLocal } from "./cursor-local.ts";
+import { readOpencodeDb } from "./opencode.ts";
 import {
   cursorStateDbPath,
   listClaudeCodeFiles,
   listClaudeCoworkFiles,
   listCodexFiles,
   listCursorTranscriptFiles,
+  listOpencodeDbs,
 } from "./paths.ts";
 import type { ExtractState, FileState, Source, TokenEvent } from "./types.ts";
 
@@ -90,7 +92,8 @@ export interface CollectOptions {
   /** Flush a batch once it holds at least this many events. */
   batchSize?: number;
   sources?: readonly FileSource[];
-  /** Read only these folders for a source, in place of its default locations (and env). */
+  /** Read only these folders for a source, in place of its default locations (and env). For
+   *  `opencode`, the folders that hold its databases. */
   dirs?: Partial<Record<Source, readonly string[]>>;
   cursorDbPath?: string;
   /** Message keys already taken this run. A long-running caller can pass a smaller set, such as one
@@ -201,6 +204,30 @@ export async function* collect(state: ExtractState, opts: CollectOptions): Async
           events: batch.events,
           commit: (s) => ({ ...batch.commit(s), cursorLocal: { dbPath, lastRowid: r.newRowid } }),
         };
+      } catch (err) {
+        opts.onError?.(err, `parse:${dbPath}`);
+      }
+    }
+  }
+
+  // A batch per page of each database table, checkpointed at that page's last row.
+  if (opts.enabled.has("opencode")) {
+    const dirs = opts.dirs?.opencode;
+    const dbPaths = dirs ? [...new Set(dirs.flatMap((dir) => listOpencodeDbs(dir)))] : listOpencodeDbs();
+    for (const dbPath of dbPaths) {
+      try {
+        for (const page of readOpencodeDb({ dbPath, prev: state.opencode?.[dbPath] })) {
+          take(page.events);
+          const batch = flush();
+          yield {
+            events: batch.events,
+            commit: (s) => {
+              const next = batch.commit(s);
+              const db = { ...next.opencode?.[dbPath], [page.table]: page.cursor };
+              return { ...next, opencode: { ...next.opencode, [dbPath]: db } };
+            },
+          };
+        }
       } catch (err) {
         opts.onError?.(err, `parse:${dbPath}`);
       }

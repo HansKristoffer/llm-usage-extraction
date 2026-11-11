@@ -10,6 +10,7 @@ Reads token usage from the session logs that AI coding agents write on your mach
 | `cursor_local`  | Cursor's `state.vscdb` (`CURSOR_DATA_DIR`) and agent transcripts (`CURSOR_PROJECTS_DIR`)                                                                                             |
 | `cursor_api`    | Cursor's usage dashboard, signed in with the token in `state.vscdb`. Opt-in                                                                                                          |
 | `grok_bot`      | Grok Bot's rows on that same dashboard. Opt-in                                                                                                                                       |
+| `opencode`      | OpenCode's `opencode.db` and `opencode-<channel>.db` in `$XDG_DATA_HOME/opencode` (or `~/.local/share/opencode`, on every OS), and `OPENCODE_DB`                                     |
 
 App data lives in `~/Library/Application Support` on macOS, `%APPDATA%` on Windows and `$XDG_CONFIG_HOME` (or `~/.config`) on Linux. `<posthog>` is `@posthog/posthog-code` there, or `POSTHOG_DESKTOP_DIR`.
 
@@ -39,10 +40,11 @@ for await (const batch of collect(state, { enabled: new Set(["claude_code", "cod
 
 Persist `state` between runs to read only new lines. `dirs` reads only the given folders for a source instead of its default locations, for example `{ claude_code: [ownDir, otherDir] }`. `seen` replaces the set of message keys used to drop repeats within a run; a long-running process reading GBs of logs can pass a smaller one, such as `{ has: (k) => hashes.has(Bun.hash(k)), add: (k) => hashes.add(Bun.hash(k)) }`.
 
-The parsers (`parseClaudeCodeFile`, `parseCodexFile`, `parseCursorTranscriptFile`, `parseCursorLocal`, and `fetchCursorUsagePages` for the dashboard) and the file listers (`listClaudeCodeFiles(dir?)` and friends) are exported for callers that walk other directories. A lister given a `dir` reads only that folder; with none it reads every default location.
+The parsers (`parseClaudeCodeFile`, `parseCodexFile`, `parseCursorTranscriptFile`, `parseCursorLocal`, `readOpencodeDb`, and `fetchCursorUsagePages` for the dashboard) and the file listers (`listClaudeCodeFiles(dir?)`, `listOpencodeDbs(dir?)` and friends) are exported for callers that walk other directories. A lister given a `dir` reads only that folder; with none it reads every default location.
 
 ## What it handles
 
 - Claude Code writes one line per content block with the same message id, and only the last has the final `output_tokens`. Each message counts once, with the last line's numbers. A message split across two reads arrives twice with the same ids; keep the larger numbers.
 - Codex's `input_tokens` includes cached tokens; events report them separately. Replayed `token_count` lines and the parent history copied into forked or subagent rollouts are not counted again.
+- OpenCode keeps messages in SQLite: `message` in 1.x, `session_message` in 2.x, which copies older sessions over with the same ids, so each message counts once. The database is opened read-only and only ids, times, model names and token counts are selected. A reply counts once it has finished; a reply with no tokens (aborted) does not count. OpenCode's `output` leaves out reasoning, so reasoning is added back to match the other sources. Reads resume from the last `(time_updated, id)` per table, 5000 rows a batch. A message updated after it was read arrives again with the same ids.
 - Session logs of several GB are read in bounded windows, and a partly written last line is left for the next read.

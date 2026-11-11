@@ -2,11 +2,24 @@
  * `cursor_api` is the same Cursor usage as `cursor_local`, as Cursor's dashboard reports it: enable
  * one or the other, not both. `grok_bot` rows come from that dashboard too.
  */
-export type Source = "claude_code" | "claude_cowork" | "codex" | "cursor_local" | "cursor_api" | "grok_bot";
+export type Source =
+  | "claude_code"
+  | "claude_cowork"
+  | "codex"
+  | "cursor_local"
+  | "cursor_api"
+  | "grok_bot"
+  | "opencode";
 
 /** The sources read from local files. The dashboard sources are left out, so enabling all of these
  *  never sends the user's Cursor login anywhere. */
-export const SOURCES: readonly Source[] = ["claude_code", "claude_cowork", "codex", "cursor_local"];
+export const SOURCES: readonly Source[] = [
+  "claude_code",
+  "claude_cowork",
+  "codex",
+  "cursor_local",
+  "opencode",
+];
 
 export type MessageType = "user" | "assistant";
 
@@ -57,4 +70,17 @@ export interface ExtractState {
   cursorLocal?: { dbPath: string; lastRowid: number };
   /** The Cursor account last read from the dashboard, and when the whole window was read. */
   cursorApi?: { accountId: string; checkedAt: number };
+  /** Per OpenCode database path, then per message table, the last row read. */
+  opencode?: Record<string, OpencodeState>;
 }
+
+/** Where a table's last read stopped: rows are read in `time_updated`, then `id`, order. */
+export interface OpencodeCursor {
+  updatedAt: number;
+  id: string;
+}
+
+/** OpenCode 1.x wrote messages to `message`; 2.x writes `session_message` and may keep `message`. */
+export type OpencodeTable = "message" | "session_message";
+
+export type OpencodeState = Partial<Record<OpencodeTable, OpencodeCursor>>;

@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { constants, Database } from "bun:sqlite";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
@@ -171,23 +171,20 @@ export interface ParseAntigravityOptions {
 }
 
 /**
- * Antigravity's databases use a write-ahead log. While it has one open, SQLite keeps `-wal` and
- * `-shm` beside it and a read-only connection shares them. Once it closes the conversation they are
- * gone, and a read-only connection can't make them, so the file is opened as immutable instead:
- * with no `-wal`, every change is already in the file. Nothing is ever written next to it.
+ * Antigravity's databases use a write-ahead log. While it has a conversation open, SQLite keeps
+ * `-wal` and `-shm` beside it, and a read-only connection shares them. Once it closes the
+ * conversation they are gone and every change is in the file itself, so it is opened as immutable:
+ * a read-only connection would fail there on macOS, and create `-shm` beside it on Linux.
  */
 function openReadOnly(path: string): Database {
-  const db = new Database(path, { readonly: true });
-  try {
-    // Antigravity may be writing: wait for it rather than fail the read.
-    db.exec("PRAGMA busy_timeout = 2000");
-    db.query("SELECT 1 FROM sqlite_master LIMIT 1").get();
-    return db;
-  } catch (err) {
-    db.close();
-    if ((err as { code?: string }).code !== "SQLITE_CANTOPEN" || existsSync(`${path}-wal`)) throw err;
-    return new Database(`${pathToFileURL(path).href}?immutable=1`, { readonly: true });
+  if (!existsSync(`${path}-wal`)) {
+    const uri = `${pathToFileURL(path).href}?immutable=1`;
+    return new Database(uri, constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_URI);
   }
+  const db = new Database(path, { readonly: true });
+  // Antigravity may be writing: wait for it rather than fail the read.
+  db.exec("PRAGMA busy_timeout = 2000");
+  return db;
 }
 
 /** The calls and user messages added to a conversation file since `prev`. */

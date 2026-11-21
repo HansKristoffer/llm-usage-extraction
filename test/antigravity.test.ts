@@ -190,9 +190,6 @@ describe("Antigravity databases", () => {
     c.db.close();
     for (const f of ["cas-1.db-wal", "cas-1.db-shm"]) rmSync(join(conversations, f), { force: true });
     expect(readdirSync(conversations)).toEqual(["cas-1.db"]);
-    expect(() =>
-      new Database(join(conversations, "cas-1.db"), { readonly: true }).query("SELECT 1").get(),
-    ).toThrow();
 
     const { events } = await drain({ files: {} });
 

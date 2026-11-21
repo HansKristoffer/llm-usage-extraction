@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.4.0...v0.5.0) (2026-11-21)
+
+
+### Features
+
+* read Antigravity usage ([#10](https://github.com/HansKristoffer/llm-usage-extraction/issues/10)) ([d818c0f](https://github.com/HansKristoffer/llm-usage-extraction/commit/d818c0f6939b10755b872ff057969272d331b963))
+
 ## [0.4.0](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.3.1...v0.4.0) (2026-11-11)
 
 

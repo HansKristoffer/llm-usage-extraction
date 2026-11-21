@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { antigravityMtime, parseAntigravityFile } from "./antigravity.ts";
 import { parseClaudeCodeFile } from "./claude-code.ts";
 import { parseCodexFile } from "./codex.ts";
 import { type CursorCredentials, fetchCursorUsagePages, loadCursorCredentials } from "./cursor-api.ts";
@@ -7,6 +8,7 @@ import { parseCursorLocal } from "./cursor-local.ts";
 import { readOpencodeDb } from "./opencode.ts";
 import {
   cursorStateDbPath,
+  listAntigravityFiles,
   listClaudeCodeFiles,
   listClaudeCoworkFiles,
   listCodexFiles,
@@ -20,6 +22,8 @@ export interface FileSource {
   id: Source;
   /** The files under `dir`, or under the default locations when there is none. */
   list: (dir?: string) => Promise<string[]>;
+  /** When a file last changed, if not its own mtime; null when it is gone. */
+  mtime?: (path: string) => Promise<number | null>;
   parse: (
     path: string,
     prev: FileState | undefined,
@@ -76,6 +80,17 @@ export const FILE_SOURCES: readonly FileSource[] = [
       };
     },
   },
+  {
+    id: "antigravity",
+    list: listAntigravityFiles,
+    mtime: antigravityMtime,
+    parse: async (path, prev, mtimeMs) => {
+      const r = await parseAntigravityFile({ path, prev: prev?.antigravity, fileMtimeMs: mtimeMs });
+      // Not readable right now: keep the last read, so the file is tried again.
+      if (!r.cursor) return { events: [], next: prev ?? { path, mtimeMs: 0, byteOffset: 0 } };
+      return { events: r.events, next: { path, mtimeMs, byteOffset: 0, antigravity: r.cursor } };
+    },
+  },
 ];
 
 /** One event per source, message, request and message type. */
@@ -93,7 +108,7 @@ export interface CollectOptions {
   batchSize?: number;
   sources?: readonly FileSource[];
   /** Read only these folders for a source, in place of its default locations (and env). For
-   *  `opencode`, the folders that hold its databases. */
+   *  `opencode`, the folders that hold its databases; for `antigravity`, its data dirs. */
   dirs?: Partial<Record<Source, readonly string[]>>;
   cursorDbPath?: string;
   /** Message keys already taken this run. A long-running caller can pass a smaller set, such as one
@@ -172,7 +187,7 @@ export async function* collect(state: ExtractState, opts: CollectOptions): Async
     // batch at a time, not one after another.
     for (let i = 0; i < paths.length; i += STAT_BATCH) {
       const batch = paths.slice(i, i + STAT_BATCH);
-      const mtimes = await Promise.all(batch.map(mtimeOf));
+      const mtimes = await Promise.all(batch.map(source.mtime ?? mtimeOf));
       for (const [j, path] of batch.entries()) {
         present.add(path);
         const mtimeMs = mtimes[j];

@@ -47,6 +47,12 @@ export function opencodeDataDir(): string {
   return join(resolveDir(process.env.XDG_DATA_HOME, join(homedir(), ".local", "share")), "opencode");
 }
 
+/** Antigravity's data dir, which holds `conversations/` and the running server's `daemon/` file. The
+ *  `antigravity-ide` and `antigravity-backup` folders beside it are copies its migration made. */
+export function antigravityDir(): string {
+  return resolveDir(process.env.ANTIGRAVITY_DATA_DIR, join(homedir(), ".gemini", "antigravity"));
+}
+
 export function cursorProjectsDir(): string {
   return resolveDir(process.env.CURSOR_PROJECTS_DIR, join(homedir(), ".cursor", "projects"));
 }
@@ -221,4 +227,26 @@ export function listOpencodeDbs(dir?: string): string[] {
     if (!out.includes(path) && statSync(path, { throwIfNoEntry: false })?.isFile()) out.push(path);
   }
   return out;
+}
+
+/** A conversation: `<id>.db`, or the older encrypted `<id>.pb`. */
+const ANTIGRAVITY_CONVERSATION = /^[\w-]+\.(db|pb)$/;
+
+/**
+ * The conversations under an Antigravity data dir, each once: a `.pb` that also has a `.db` is the
+ * same conversation, and the `.db` is read.
+ */
+export async function listAntigravityFiles(dir = antigravityDir()): Promise<string[]> {
+  const base = join(dir, "conversations");
+  let names: string[];
+  try {
+    names = readdirSync(base).filter((f) => ANTIGRAVITY_CONVERSATION.test(f));
+  } catch {
+    return [];
+  }
+  const dbs = new Set(names.filter((f) => f.endsWith(".db")));
+  return names
+    .filter((f) => f.endsWith(".db") || !dbs.has(`${f.slice(0, -3)}.db`))
+    .sort()
+    .map((f) => join(base, f));
 }

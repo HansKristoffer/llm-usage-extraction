@@ -9,16 +9,19 @@ export type Source =
   | "cursor_local"
   | "cursor_api"
   | "grok_bot"
-  | "opencode";
+  | "opencode"
+  | "antigravity";
 
-/** The sources read from local files. The dashboard sources are left out, so enabling all of these
- *  never sends the user's Cursor login anywhere. */
+/** The sources read on this machine. The dashboard sources are left out, so enabling all of these
+ *  never sends the user's Cursor login anywhere. `antigravity` asks only Antigravity's own server
+ *  on `127.0.0.1`, for its older conversations. */
 export const SOURCES: readonly Source[] = [
   "claude_code",
   "claude_cowork",
   "codex",
   "cursor_local",
   "opencode",
+  "antigravity",
 ];
 
 export type MessageType = "user" | "assistant";
@@ -62,6 +65,15 @@ export interface FileState {
   };
   /** Codex only: model in effect at the end of the last read, carried into the next one. */
   lastModel?: string;
+  /** Antigravity only: the rows of the conversation already read. */
+  antigravity?: AntigravityCursor;
+}
+
+/** How many rows of an Antigravity conversation were read: model calls, and steps (where user
+ *  messages are). */
+export interface AntigravityCursor {
+  generators: number;
+  steps: number;
 }
 
 /** Where each source's last read stopped. Callers persist it and may add their own fields. */

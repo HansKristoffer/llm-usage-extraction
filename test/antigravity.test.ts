@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseAntigravityFile } from "../src/antigravity.ts";
 import { type CollectOptions, collect } from "../src/collect.ts";
-import { antigravityCliDir, antigravityDir, listAntigravityFiles } from "../src/paths.ts";
+import { antigravityCliDir, antigravityDir, listAntigravityFiles, t3CodeDir } from "../src/paths.ts";
 import type { ExtractState, TokenEvent } from "../src/types.ts";
 
 let dir: string;
@@ -20,6 +20,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.ANTIGRAVITY_DATA_DIR;
   delete process.env.ANTIGRAVITY_CLI_DATA_DIR;
+  delete process.env.T3_CODE_DIR;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -329,6 +330,7 @@ describe("Antigravity's older encrypted conversations", () => {
 test("lists each conversation once, preferring the database", async () => {
   process.env.ANTIGRAVITY_DATA_DIR = dir;
   process.env.ANTIGRAVITY_CLI_DATA_DIR = join(dir, "missing");
+  process.env.T3_CODE_DIR = join(dir, "missing");
   expect(antigravityDir()).toBe(dir);
   for (const name of ["a.db", "a.pb", "b.pb", "c.db", "c.db-wal", "c.db-shm", "notes.txt"]) {
     writeFileSync(join(conversations, name), "");
@@ -344,10 +346,25 @@ test("lists the CLI's conversations beside the app's", async () => {
   writeFileSync(join(cli, "conversations", "b.db"), "");
   process.env.ANTIGRAVITY_DATA_DIR = dir;
   process.env.ANTIGRAVITY_CLI_DATA_DIR = cli;
+  process.env.T3_CODE_DIR = join(dir, "missing");
   expect(antigravityCliDir()).toBe(cli);
   expect(await listAntigravityFiles()).toEqual([
     join(conversations, "a.db"),
     join(cli, "conversations", "b.db"),
   ]);
   expect(await listAntigravityFiles(cli)).toEqual([join(cli, "conversations", "b.db")]);
+});
+
+test("lists the conversations of each Antigravity T3 Code runs", async () => {
+  const t3 = join(dir, "t3");
+  const acp = (id: string) =>
+    join(t3, "userdata", "providers", "antigravity", id, "antigravity-acp", "conversations");
+  for (const id of ["one", "two"]) mkdirSync(acp(id), { recursive: true });
+  writeFileSync(join(acp("one"), "a.db"), "");
+  writeFileSync(join(acp("two"), "b.db"), "");
+  process.env.ANTIGRAVITY_DATA_DIR = join(dir, "missing");
+  process.env.ANTIGRAVITY_CLI_DATA_DIR = join(dir, "missing");
+  process.env.T3_CODE_DIR = t3;
+  expect(t3CodeDir()).toBe(t3);
+  expect(await listAntigravityFiles()).toEqual([join(acp("one"), "a.db"), join(acp("two"), "b.db")]);
 });

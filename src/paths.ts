@@ -58,6 +58,22 @@ export function antigravityCliDir(): string {
   return resolveDir(process.env.ANTIGRAVITY_CLI_DATA_DIR, join(homedir(), ".gemini", "antigravity-cli"));
 }
 
+/** T3 Code's data dir. It runs Antigravity with a data dir of its own, one per provider instance. */
+export function t3CodeDir(): string {
+  return resolveDir(process.env.T3_CODE_DIR, join(homedir(), ".t3"));
+}
+
+function t3CodeAntigravityDirs(): string[] {
+  const base = join(t3CodeDir(), "userdata", "providers", "antigravity");
+  try {
+    return readdirSync(base)
+      .sort()
+      .map((id) => join(base, id, "antigravity-acp"));
+  } catch {
+    return [];
+  }
+}
+
 export function cursorProjectsDir(): string {
   return resolveDir(process.env.CURSOR_PROJECTS_DIR, join(homedir(), ".cursor", "projects"));
 }
@@ -239,11 +255,12 @@ const ANTIGRAVITY_CONVERSATION = /^[\w-]+\.(db|pb)$/;
 
 /**
  * The conversations under an Antigravity data dir, each once: a `.pb` that also has a `.db` is the
- * same conversation, and the `.db` is read. With no `dir`, the app's and the CLI's.
+ * same conversation, and the `.db` is read. With no `dir`, the app's, the CLI's and the ones T3 Code runs.
  */
 export async function listAntigravityFiles(dir?: string): Promise<string[]> {
   if (dir !== undefined) return listAntigravityDir(dir);
-  return [...new Set([antigravityDir(), antigravityCliDir()])].flatMap(listAntigravityDir);
+  const dirs = [antigravityDir(), antigravityCliDir(), ...t3CodeAntigravityDirs()];
+  return [...new Set(dirs)].flatMap(listAntigravityDir);
 }
 
 function listAntigravityDir(dir: string): string[] {

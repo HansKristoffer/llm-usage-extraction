@@ -53,6 +53,11 @@ export function antigravityDir(): string {
   return resolveDir(process.env.ANTIGRAVITY_DATA_DIR, join(homedir(), ".gemini", "antigravity"));
 }
 
+/** The Antigravity CLI's data dir, laid out like the app's. */
+export function antigravityCliDir(): string {
+  return resolveDir(process.env.ANTIGRAVITY_CLI_DATA_DIR, join(homedir(), ".gemini", "antigravity-cli"));
+}
+
 export function cursorProjectsDir(): string {
   return resolveDir(process.env.CURSOR_PROJECTS_DIR, join(homedir(), ".cursor", "projects"));
 }
@@ -234,9 +239,14 @@ const ANTIGRAVITY_CONVERSATION = /^[\w-]+\.(db|pb)$/;
 
 /**
  * The conversations under an Antigravity data dir, each once: a `.pb` that also has a `.db` is the
- * same conversation, and the `.db` is read.
+ * same conversation, and the `.db` is read. With no `dir`, the app's and the CLI's.
  */
-export async function listAntigravityFiles(dir = antigravityDir()): Promise<string[]> {
+export async function listAntigravityFiles(dir?: string): Promise<string[]> {
+  if (dir !== undefined) return listAntigravityDir(dir);
+  return [...new Set([antigravityDir(), antigravityCliDir()])].flatMap(listAntigravityDir);
+}
+
+function listAntigravityDir(dir: string): string[] {
   const base = join(dir, "conversations");
   let names: string[];
   try {

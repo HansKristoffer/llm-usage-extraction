@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseAntigravityFile } from "../src/antigravity.ts";
 import { type CollectOptions, collect } from "../src/collect.ts";
-import { antigravityDir, listAntigravityFiles } from "../src/paths.ts";
+import { antigravityCliDir, antigravityDir, listAntigravityFiles } from "../src/paths.ts";
 import type { ExtractState, TokenEvent } from "../src/types.ts";
 
 let dir: string;
@@ -19,6 +19,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.ANTIGRAVITY_DATA_DIR;
+  delete process.env.ANTIGRAVITY_CLI_DATA_DIR;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -327,10 +328,26 @@ describe("Antigravity's older encrypted conversations", () => {
 
 test("lists each conversation once, preferring the database", async () => {
   process.env.ANTIGRAVITY_DATA_DIR = dir;
+  process.env.ANTIGRAVITY_CLI_DATA_DIR = join(dir, "missing");
   expect(antigravityDir()).toBe(dir);
   for (const name of ["a.db", "a.pb", "b.pb", "c.db", "c.db-wal", "c.db-shm", "notes.txt"]) {
     writeFileSync(join(conversations, name), "");
   }
   expect(await listAntigravityFiles()).toEqual(["a.db", "b.pb", "c.db"].map((f) => join(conversations, f)));
   expect(await listAntigravityFiles(join(dir, "missing"))).toEqual([]);
+});
+
+test("lists the CLI's conversations beside the app's", async () => {
+  const cli = join(dir, "cli");
+  mkdirSync(join(cli, "conversations"), { recursive: true });
+  writeFileSync(join(conversations, "a.db"), "");
+  writeFileSync(join(cli, "conversations", "b.db"), "");
+  process.env.ANTIGRAVITY_DATA_DIR = dir;
+  process.env.ANTIGRAVITY_CLI_DATA_DIR = cli;
+  expect(antigravityCliDir()).toBe(cli);
+  expect(await listAntigravityFiles()).toEqual([
+    join(conversations, "a.db"),
+    join(cli, "conversations", "b.db"),
+  ]);
+  expect(await listAntigravityFiles(cli)).toEqual([join(cli, "conversations", "b.db")]);
 });

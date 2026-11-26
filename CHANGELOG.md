@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.5.0...v0.5.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **antigravity:** read the Antigravity CLI's conversations too ([dff3198](https://github.com/HansKristoffer/llm-usage-extraction/commit/dff31984bdb12a0088a9dfd853d7236f02ae8310))
+* **antigravity:** read the Antigravity CLI's conversations too ([3ba6d9f](https://github.com/HansKristoffer/llm-usage-extraction/commit/3ba6d9fce842b57870db13c4090cb168cb80eee6))
+
 ## [0.5.0](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.4.0...v0.5.0) (2026-11-21)
 
 

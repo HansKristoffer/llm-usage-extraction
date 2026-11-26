@@ -1,6 +1,6 @@
 {
   "name": "llm-usage-extraction",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Read token usage from the local session logs of Claude Code, Claude Cowork, Codex, Cursor, OpenCode and Antigravity",
   "type": "module",
   "license": "MIT",

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.5.1...v0.5.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **antigravity:** read the conversations of each Antigravity T3 Code runs ([#14](https://github.com/HansKristoffer/llm-usage-extraction/issues/14)) ([3d98696](https://github.com/HansKristoffer/llm-usage-extraction/commit/3d9869638651ff6556821757c6941bdb8d33e571))
+
 ## [0.5.1](https://github.com/HansKristoffer/llm-usage-extraction/compare/v0.5.0...v0.5.1) (2026-11-26)
 
 
